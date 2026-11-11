@@ -1,0 +1,10 @@
+{
+  "name": "vytl-ramble",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "bun index.ts" },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
+    "web-push": "3.6.7"
+  }
+}
