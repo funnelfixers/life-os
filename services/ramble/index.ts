@@ -373,7 +373,7 @@ async function overview(date = today()) {
         sql`SELECT * FROM days WHERE date = ${date}`,
         sql`SELECT * FROM training WHERE date = ${date}`,
         calendarEvents(date),
-        getPlan(),
+        planFor(date),
       ]),
     wd = date === today() ? dow : new Date(date + "T12:00Z").getUTCDay(),
     workday = wd >= 1 && wd <= 5,
@@ -998,10 +998,68 @@ var getPlan = async () => {
     let plan = cleanPlan(p);
     return await setSetting("training_plan", plan), plan;
   };
+// Thuisoefeningen hebben een naam die begint met "Thuis:". Een gymdag is een dag met minstens
+// één echte oefening (geen thuis-, warming-up- of finisher-oefening); daar laten we de
+// thuisoefeningen weg. Dagen met alleen thuisoefeningen blijven zoals ze zijn.
+var isHomeEx = (e) => /^thuis\s*:/i.test(e?.name || ""),
+  isGymDay = (w) =>
+    (w?.exercises || []).some(
+      (e) => !isHomeEx(e) && !/^(warming-up|finisher)\s*:/i.test(e.name),
+    );
 function workoutFor(plan, date) {
   if (!plan?.days?.length) return null;
   let w = plan.days.find((d) => d.dow === dowOf(date));
-  return w ? { ...w, date } : { rest: !0, dow: dowOf(date), date };
+  if (!w) return { rest: !0, dow: dowOf(date), date };
+  let exercises = isGymDay(w)
+    ? w.exercises.filter((e) => !isHomeEx(e))
+    : w.exercises;
+  return { ...w, from: w.from ?? w.dow, exercises, date };
+}
+// Weekindeling: voor één week kun je trainingen naar andere dagen schuiven of overslaan,
+// zonder je vaste schema te veranderen. Opgeslagen als settings "training_week:<maandag>"
+// met days: [{ dow, from }] = op dag dow de training die in het schema op dag from staat.
+var weekKey = (date) => "training_week:" + weekStart(date);
+async function getWeekPlan(date) {
+  let w = await getSetting(weekKey(date));
+  return w ? parseJson(w) : null;
+}
+function applyWeek(plan, week) {
+  if (!plan?.days?.length || !week?.days) return plan;
+  let days = week.days
+    .map((o) => {
+      let src = plan.days.find((d) => d.dow === o.from);
+      return src && { ...src, dow: o.dow, from: o.from };
+    })
+    .filter(Boolean)
+    .sort((a, b) => ((a.dow + 6) % 7) - ((b.dow + 6) % 7));
+  return { ...plan, days };
+}
+async function planFor(date) {
+  let [plan, week] = await Promise.all([getPlan(), getWeekPlan(date)]);
+  return applyWeek(plan, week);
+}
+async function setWeekPlan(b) {
+  let date = isDate(b?.date) ? b.date : today(),
+    ws = weekStart(date);
+  if (b?.reset || !Array.isArray(b?.days)) {
+    await sql`DELETE FROM settings WHERE key = ${weekKey(date)}`;
+    return trainingWeek(date);
+  }
+  let plan = await getPlan(),
+    seenDow = new Set(),
+    days = b.days
+      .map((o) => ({ dow: Number(o?.dow), from: Number(o?.from) }))
+      .filter(
+        (o) =>
+          Number.isInteger(o.dow) &&
+          o.dow >= 0 &&
+          o.dow <= 6 &&
+          plan?.days?.some((d) => d.dow === o.from) &&
+          !seenDow.has(o.dow) &&
+          seenDow.add(o.dow),
+      );
+  await setSetting(weekKey(date), { week: ws, days, updated: today() });
+  return trainingWeek(date);
 }
 function trainSchedule(plan, date) {
   let w = workoutFor(plan, date);
@@ -1020,11 +1078,13 @@ function trainSchedule(plan, date) {
 }
 async function trainingWeek(date = today()) {
   let ws = weekStart(date),
-    [plan, sessions, history] = await Promise.all([
+    [base, week, sessions, history] = await Promise.all([
       getPlan(),
+      getWeekPlan(date),
       sql`SELECT * FROM training WHERE date >= ${ws} AND date <= ${addDays(ws, 6)} ORDER BY date, id`,
       sql`SELECT * FROM training WHERE status = 'gedaan' ORDER BY date DESC, id DESC LIMIT 40`,
     ]),
+    plan = applyWeek(base, week),
     last = {};
   for (let s of history)
     for (let e of parseJson(s.exercises) || [])
@@ -1044,7 +1104,8 @@ async function trainingWeek(date = today()) {
     };
   });
   return {
-    plan,
+    plan: base,
+    week: week && base ? { days: week.days } : null,
     today: today(),
     days,
     done: sessions.filter((s) => s.status === "gedaan").length,
@@ -1064,7 +1125,7 @@ async function logTraining(f) {
       { date, undone: !0 }
     );
   let status = pick(f.status, TRAIN_STATUS, "gedaan"),
-    w = workoutFor(await getPlan(), date),
+    w = workoutFor(await planFor(date), date),
     ex = Array.isArray(f.exercises)
       ? JSON.stringify(
           f.exercises
@@ -1339,6 +1400,29 @@ var COACH_TOOLS = [
     },
   },
   {
+    name: "set_training_week",
+    description:
+      "Alleen voor één week trainingen naar andere dagen schuiven of overslaan (bijv. 'deze week maar 2x gym'), zonder het vaste schema te veranderen. Geef ALLE trainingen die die week wél doorgaan: dow = dag waarop hij nu valt, from = dag waarop die training in het vaste schema staat. reset: true = terug naar het vaste schema.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date: { type: "string", description: "Een datum in die week, standaard vandaag" },
+        days: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              dow: { type: "integer", description: "0=zo, 1=ma ... 6=za" },
+              from: { type: "integer", description: "Dag in het vaste schema (0=zo ... 6=za)" },
+            },
+            required: ["dow", "from"],
+          },
+        },
+        reset: { type: "boolean" },
+      },
+    },
+  },
+  {
     name: "set_training_plan",
     description:
       "Trainingsschema vastleggen of aanpassen. Geef het VOLLEDIGE schema (alleen trainingsdagen; rustdagen weglaten). Vervangt het huidige schema.",
@@ -1519,6 +1603,8 @@ ORDER BY postponed DESC, deadline NULLS LAST, id LIMIT ${limit}`;
       return trainingWeek(d(input.date));
     case "set_training_plan":
       return setPlan(input);
+    case "set_training_week":
+      return setWeekPlan(input);
     case "block_task":
       return blockTask(input);
     case "list_journal": {
@@ -1890,7 +1976,7 @@ Werkwijze:
 - Elke taak heeft een eerste stap van max. 5 minuten. Vastgelopen? Hak op tot een belachelijk kleine stap en stel 25 minuten focus voor.
 - Uitgesteld (postponed ≥ 3)? Confronteer: doen, delegeren, opknippen of schrappen.
 - Training overgeslagen: kort waarom, log het, en plan direct een nieuw moment (15 minuten wandelen telt ook).
-- Trainingsschema: snapshot.workout is de geplande training van vandaag (rest = rustdag, null = nog geen schema). Raoul vinkt trainingen af in het Training-scherm; hoort je dat hij getraind heeft, log het met log_training. get_training geeft de week en vorige resultaten (progressie: stel bij goede sessies iets meer gewicht of herhalingen voor). Schema aanpassen of een nieuw schema maken: set_training_plan met het volledige schema. Nog geen schema? Bied aan er samen een te maken.
+- Trainingsschema: snapshot.workout is de geplande training van vandaag (rest = rustdag, null = nog geen schema). Raoul vinkt trainingen af in het Training-scherm; hoort je dat hij getraind heeft, log het met log_training. get_training geeft de week en vorige resultaten (progressie: stel bij goede sessies iets meer gewicht of herhalingen voor). Schema aanpassen of een nieuw schema maken: set_training_plan met het volledige schema. Kan hij een week minder of op andere dagen trainen, schuif dan alleen die week met set_training_week (vaste schema blijft staan). Op gymdagen worden oefeningen die met "Thuis:" beginnen niet getoond. Nog geen schema? Bied aan er samen een te maken.
 - Agenda en timeblocking: snapshot.events zijn de afspraken van vandaag uit Google Calendar (task = id van een ingeplande VYTL-taak). Vraagt Raoul om zijn dag te plannen, zet de Top 3 dan met block_task als blokken in vrije ruimte: Deep work-taken in 9:00-12:00, Shallow work in 14:30-16:30, nooit over afspraken, training of gezinstijd heen.
 - Nieuw idee tijdens focus: zet het als taak met status 'later' en breng de focus terug naar de Top 3.
 - Balans en levensgebieden (Levenskompas): naast werk krijgt Raoul elke dag \xE9\xE9n kleine "1% leven"-actie (≤15 min) uit het gebied dat deze week achterloopt op zijn ritme (zie snapshot.life). Houd dit licht: \xE9\xE9n ding per dag, niet alles tegelijk. Verbind keuzes met de kernwaarden. Nieuwe stappen richting een droom leg je vast met add_task (life: true, status 'later').
@@ -2573,6 +2659,8 @@ ${lines.join(`
     );
   if (p === "/api/training/plan" && m === "POST")
     return json(await setPlan(await body()));
+  if (p === "/api/training/week" && m === "POST")
+    return json(await setWeekPlan(await body()));
   if (p === "/api/training/generate" && m === "POST")
     return json(await generatePlan(await body()));
   if (p === "/api/training/log" && m === "POST")
