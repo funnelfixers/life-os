@@ -57,7 +57,7 @@ ${t.vandaag?today():null}, ${isDate(t.deadline)?t.deadline:null}, ${Number.isInt
 ) RETURNING *`;return row}async function updateTask(id,f){let set={};if(f.title!=null)set.title=str(f.title,300);if(f.first_step!=null)set.first_step=str(f.first_step,
 500);if(f.area!==void 0)set.area=pick(f.area,await listNames(),null);if(f.energy!==void 0)set.energy=pick(f.energy,ENERGIE,null);if(f.block!==void 0)set.block=pick(f.block,
 BLOKKEN,null);if(f.deadline!==void 0)set.deadline=isDate(f.deadline)?f.deadline:null;if(f.plan_date!==void 0)set.plan_date=isDate(f.plan_date)?f.plan_date:null;if(f.top3_date!==void 0)set.top3_date=isDate(f.top3_date)?f.top3_date:null;if(f.goal_id!==void 0)set.goal_id=Number.isInteger(f.goal_id)?f.goal_id:null;
-if(f.status!=null){let s=pick(f.status,STATUSES,null);if(!s)throw Error("Ongeldige status");set.status=s,set.done_at=s==="done"?new Date:null}if(!Object.keys(set).length)throw Error("Niets om bij te werken");
+if(f.status!=null){let s=pick(f.status,STATUSES,null);if(!s)throw Error("Ongeldige status");set.status=s,set.done_at=s==="done"?new Date:null;if(["later","archived"].includes(s)&&f.top3_date===void 0)set.top3_date=null}if(!Object.keys(set).length)throw Error("Niets om bij te werken");
 let[row]=await sql`UPDATE tasks SET ${sql(set)} WHERE id = ${id} RETURNING *`;if(!row)throw Error(`Taak ${id} niet gevonden`);return row}async function postponeTask(id,
 toDate){let[row]=await sql`UPDATE tasks SET postponed = postponed + 1, top3_date = ${toDate}, status = 'today'
 WHERE id = ${id} RETURNING *`;if(!row)throw Error(`Taak ${id} niet gevonden`);return row}async function setTop3(date,ids){if(ids.length>3)throw Error("Maximaal 3 taken in je Top 3");
