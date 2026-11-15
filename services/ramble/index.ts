@@ -42,7 +42,7 @@ await sql`CREATE TABLE IF NOT EXISTS checkins_sent (date text NOT NULL, slot tex
 await sql`CREATE TABLE IF NOT EXISTS area_scores (week text NOT NULL, area text NOT NULL, score int, PRIMARY KEY (week, area))`,await sql`CREATE TABLE IF NOT EXISTS blocks (id serial PRIMARY KEY, task_id int, title text, date text NOT NULL, start_at text NOT NULL, minutes int NOT NULL)`,await sql`ALTER TABLE life_areas ADD COLUMN IF NOT EXISTS active boolean DEFAULT true`,
 await sql`ALTER TABLE life_areas ADD COLUMN IF NOT EXISTS week_focus text DEFAULT ''`,await sql`ALTER TABLE life_areas ADD COLUMN IF NOT EXISTS rhythm text DEFAULT ''`,
 await sql`ALTER TABLE life_areas ADD COLUMN IF NOT EXISTS target int DEFAULT 1`,await sql`ALTER TABLE goals ADD COLUMN IF NOT EXISTS kind text DEFAULT 'jaar'`,await sql`ALTER TABLE goals ADD COLUMN IF NOT EXISTS parent_id int`,
-await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS life boolean DEFAULT false`,await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS micro_date text`,await sql`ALTER TABLE days ADD COLUMN IF NOT EXISTS life_task_id int`,await sql`ALTER TABLE training ADD COLUMN IF NOT EXISTS exercises jsonb`;for(let[from,
+await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS life boolean DEFAULT false`,await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS micro_date text`,await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS minutes int`,await sql`ALTER TABLE days ADD COLUMN IF NOT EXISTS life_task_id int`,await sql`ALTER TABLE training ADD COLUMN IF NOT EXISTS exercises jsonb`;for(let[from,
 to]of RENAMED){await sql`UPDATE tasks SET area = ${to} WHERE area = ${from}`,await sql`UPDATE goals SET area = ${to} WHERE area = ${from}`;let[exists]=await sql`SELECT 1 FROM life_areas WHERE name = ${to}`;
 if(exists)await sql`UPDATE life_areas SET active = false WHERE name = ${from}`;else await sql`UPDATE life_areas SET name = ${to} WHERE name = ${from}`}for(let[i,a]of AREAS.entries())await sql`INSERT INTO life_areas (name, emoji, sort, rhythm, target) VALUES (${a.name}, ${a.emoji}, ${i}, ${a.rhythm}, ${a.target})
 ON CONFLICT (name) DO UPDATE SET emoji = EXCLUDED.emoji, sort = EXCLUDED.sort, active = true,
@@ -126,7 +126,7 @@ required:["tekst","titel","samenvatting","stemming","dankbaar","intentie","gebie
 - Blok: "Deep work" (9:00-12:00, focus en creatief werk dat het bedrijf vooruit helpt), "Shallow work" (14:30-16:30, admin, mails, bellen, meetings, simpele taken), "Thuis" (priv\xE9/huishouden, buiten werktijd).
 - Deadline alleen als die genoemd of duidelijk afgeleid wordt ("morgen", "vrijdag", "eind van de maand"); anders null. Reken vanaf vandaag.
 - Vandaag en datum: alleen invullen als de spreker zelf een dag noemt ("vandaag", "morgen bellen", "volgende week donderdag", "12 november"). Noemt hij geen dag, dan vandaag=false en datum=null: de taak gaat dan alleen in zijn project, niet op de dagplanning. Datum is iets anders dan een deadline.
-- Herstel duidelijke spraakfouten in namen/woorden.`;async function structured(system,content,schema){let params={model:MODEL,max_tokens:16000,output_config:{effort:"low",
+- Herstel duidelijke spraakfouten in namen/woorden.`;async function structured(system,content,schema,effort="low"){let params={model:MODEL,max_tokens:16000,output_config:{effort,
 format:{type:"json_schema",schema}},system,messages:[{role:"user",content}]},response;try{response=await client.beta.messages.create({...params,betas:["server-side-fallback-2026-07-01"],
 fallbacks:"default"})}catch(e){if(!(e instanceof Anthropic.BadRequestError))throw e;console.warn("Fallback niet geaccepteerd, opnieuw zonder:",e.message),response=await client.messages.create(params)}if(response.stop_reason==="refusal")throw Error("Claude kon dit niet verwerken.");
 if(response.stop_reason==="max_tokens")throw Error("Te lang, splits het op.");let block=response.content.find((b)=>b.type==="text");return JSON.parse(block.text)}async function projectSchema(){let projects=await sql`SELECT name FROM projects ORDER BY sort, id`,names=[...AREA_NAMES,...projects.map((r)=>r.name)],item={...TASK_ITEM_SCHEMA,properties:{...TASK_ITEM_SCHEMA.properties,gebied:{type:"string",enum:names,description:"Het project (of levensgebied) waar de taak in hoort"}}};
@@ -345,7 +345,71 @@ return String(data.text||"").trim()}async function speak(text){let res=await fet
 headers:{Authorization:`Bearer ${env.OPENAI_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({model:env.TTS_MODEL||"gpt-4o-mini-tts",voice:env.TTS_VOICE||"onyx",
 input:text.slice(0,4000),response_format:"mp3",instructions:"Spreek vloeiend Nederlands (Nederlandse uitspraak). Mannelijke coach: warm en direct, snel tempo zonder lange pauzes, zelfverzekerd."})});
 if(!res.ok)throw Error(`Voorlezen mislukt (${res.status})`);return new Response(res.body,{headers:{"Content-Type":"audio/mpeg","Cache-Control":"no-store"}})}var json=(data,
-status=200)=>Response.json(data,{status});async function readText(req){let raw=await req.text();try{return String(JSON.parse(raw).text??"").trim()}catch{return raw.trim()}}async function api(req,
+status=200)=>Response.json(data,{status});var WEEK_RULES=`Je bent de weekplanner van Raoul: ondernemer met ADHD (eigenaar van Pinscale), vader, partner van Eef. Doel: een realistische timeblock-planning, zodat hij niet hoeft na te denken en alleen hoeft uit te voeren.
+
+Zijn leven bestaat uit twee kanten:
+- Business: Pinscale (klanten, sales, product, team, marketing) en Business finance & admin (facturen, boekhouding, btw, contracten, abonnementen).
+- Persoonlijk: Finance & admin privé (gebied Financiën), Home (gebied Thuis: huishouden, klussen, papierwerk), Me time (gebied Mezelf: natuur, hobby, rust, sport voor jezelf), Family (gebied Gezin & Eef).
+Kies voor nieuwe taken het gebied/project: Pinscale-werk en zakelijke admin → Business (of een eigen project als dat beter past), privé-geld → Financiën, huis → Thuis, me time → Mezelf, gezin → Gezin & Eef.
+
+Duur inschatten (minuten, veelvoud van 15, minimaal 15): realistisch voor iemand met ADHD, inclusief opstarten. Mailtje/belletje/kleine klus 15, admin-klus 30-45, inhoudelijk werk 60-90, groot focuswerk 120+. Een taak langer dan 2 uur splits je in meerdere blokken (zelfde ref, andere tijd of dag).
+
+Inplannen:
+- Gebruik alleen de gegeven datums en vrije tijd. Nooit overlappen met afspraken uit de agenda of met elkaar; laat 15 minuten lucht na een afspraak.
+- Werkdagen volgen het dagritme. Deep work (meestal 9:00-12:00): het belangrijkste Pinscale-werk met hoge energie, max. 2 taken per ochtend. Shallow work (meestal 14:30-16:30): business admin/finance, mails, bellen, kleine taken; max. één persoonlijke admin-taak per dag. Lunch, training, "Plan morgen" en gezinstijd (17:00-20:00) blijven vrij.
+- Persoonlijke taken (Home, privé-admin): in een shallow-blok, op max. 2 avonden 20:00-21:00, of zaterdagochtend 9:30-12:00. Me time en Family: als echt blok in de avond (20:00-21:30) of het weekend; plan minstens één Me time-blok en één Family-blok als daar taken voor zijn.
+- Zaterdag alleen persoonlijk en licht, zondag zo leeg mogelijk.
+- Deadlines eerst (vóór de deadline-datum). Vaak uitgestelde taken vroeg in de week, op een tijd met hoge energie.
+- Vul hooguit ~80% van de vrije tijd: liever minder en haalbaar. Past het niet, zet de minst belangrijke taken in niet_ingepland met een korte reden.
+- Elke taak die je wel inplant krijgt minstens één blok. Elke taak krijgt een duur (nieuw: minuten, bestaand: schattingen).
+- Datums als YYYY-MM-DD, tijden als HH:MM (24 uur).`;
+async function weekPlan(b){let wsDate=isDate(b.week)?weekStart(b.week):weekStart(addDays(today(),7)),dates=[...Array(7)].map((_,i)=>addDays(wsDate,i)).filter((d)=>d>=today());
+if(!dates.length)throw Error("Deze week is al voorbij");let text=str(b.text,20000).trim(),ids=(Array.isArray(b.task_ids)?b.task_ids:[]).map(Number).filter(Number.isInteger).slice(0,120),
+[plan,dayRows,evs,open,ps]=await Promise.all([getPlan(),sql`SELECT date, plan FROM days WHERE date IN ${sql(dates)}`,Promise.all(dates.map((d)=>calendarEvents(d).catch(()=>[]))),
+ids.length?sql`SELECT * FROM tasks WHERE id IN ${sql(ids)} AND status NOT IN ('done','archived')`:[],projectSchema()]);if(!text&&!open.length)throw Error("Spreek eerst in wat er moet gebeuren, of kies open taken");
+let {time}=nowParts(),blocked=new Set(),days=dates.map((date,i)=>{let row=dayRows.find((r)=>r.date===date),custom=row?.plan?parseJson(row.plan):null,wd=new Date(date+"T12:00Z").getUTCDay(),
+schedule=custom??(wd>=1&&wd<=5?trainSchedule(plan,date):[]),events=evs[i].map((e)=>({title:e.title,start:e.start,end:e.end,task:e.task||null}));events.forEach((e)=>e.task&&blocked.add(e.task));
+return{date,label:dayLabel(date),schedule,events}}),tasks=open.filter((t)=>!blocked.has(t.id)),skipped=open.filter((t)=>blocked.has(t.id)).map((t)=>t.title),names=ps.item.properties.gebied.enum,
+fmtDay=(d)=>`- ${d.date} (${d.label})${d.date===today()?` · nu is het ${time}, plan alleen ná ${hm(Math.min(minutesBetween("00:00",time)+30,1439))}`:""}
+  dagritme: ${d.schedule.length?d.schedule.map((s)=>`${s.start}-${s.end} ${s.title}`).join("; "):"geen vast ritme (weekend/vrij)"}
+  agenda: ${d.events.length?d.events.map((e)=>`${e.start==="hele dag"?"hele dag":e.start+"-"+e.end} ${e.title}`).join("; "):"leeg"}`,
+fmtTask=(t)=>`- id ${t.id}: ${t.title} · ${t.area||"geen gebied"}${t.block?" · "+t.block:""}${t.energy?" · energie "+t.energy:""}${t.deadline?" · deadline "+t.deadline:""}${t.postponed?` · ${t.postponed}× uitgesteld`:""}${t.minutes?` · eerder geschat ${t.minutes} min`:""}${t.first_step?" · eerste stap: "+t.first_step:""}`,
+I=(type,description)=>({type,description}),S=(properties)=>({type:"object",properties,required:Object.keys(properties),additionalProperties:!1}),
+schema=S({nieuw:{type:"array",description:"Nieuwe taken uit de braindump (leeg als er geen braindump is)",items:S({ref:I("string","n1, n2, …"),taak:ps.item.properties.taak,eerste_stap:ps.item.properties.eerste_stap,
+gebied:{type:"string",enum:names},energie:{type:"string",enum:ENERGIE},blok:{type:"string",enum:BLOKKEN},deadline:I(["string","null"],"YYYY-MM-DD of null"),minuten:I("integer","Geschatte duur in minuten")})},
+schattingen:{type:"array",description:"Geschatte duur van elke bestaande open taak",items:S({task_id:I("integer","id van de bestaande taak"),minuten:I("integer","Geschatte duur in minuten")})},
+blokken:{type:"array",items:S({ref:I("string",'id van een bestaande taak als tekst (bijv. "42") of ref van een nieuwe taak (bijv. "n1")'),datum:I("string","YYYY-MM-DD"),start:I("string","HH:MM"),minuten:I("integer","Duur van dit blok")})},
+niet_ingepland:{type:"array",items:S({ref:I("string","task id of ref"),reden:I("string","Korte reden")})},toelichting:I("string","2-3 korte zinnen: de rode draad van de week en waar het krap is")}),
+r=await structured(WEEK_RULES+`
+${TASK_RULES}${ps.rule}`,`Vandaag is het ${dayLabel(today())} (${today()}). Plan de dagen hieronder.
+
+Dagen:
+${days.map(fmtDay).join(`
+`)}
+
+Open taken die opnieuw ingepland moeten worden:
+${tasks.length?tasks.map(fmtTask).join(`
+`):"(geen)"}
+
+Braindump voor deze week:
+${text||"(geen)"}`,schema),out={},refs={};
+for(let t of(r.nieuw||[]).slice(0,60)){let row=await addTask({...t,status:"inbox",datum:null,vandaag:!1});await sql`UPDATE tasks SET minutes = ${clampMin(t.minuten)} WHERE id = ${row.id}`;refs[t.ref]=row.id;out[row.id]={...row,minutes:clampMin(t.minuten),isNew:!0}}
+for(let t of tasks)out[t.id]={...t};for(let s of r.schattingen||[])if(out[s.task_id]&&!out[s.task_id].isNew){out[s.task_id].minutes=clampMin(s.minuten);await sql`UPDATE tasks SET minutes = ${clampMin(s.minuten)} WHERE id = ${s.task_id}`}
+let resolve=(ref)=>{ref=String(ref).trim();let id=refs[ref]??(/^\d+$/.test(ref)?Number(ref):null);return id&&out[id]?id:null},blocks=[],unplanned=[];
+for(let x of r.blokken||[]){let id=resolve(x.ref);if(!id||!dates.includes(x.datum)||!/^\d{2}:\d{2}$/.test(x.start))continue;blocks.push({task_id:id,date:x.datum,start:x.start,minutes:clampMin(x.minuten)})}
+blocks.sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start));let planned=new Set(blocks.map((x)=>x.task_id));
+for(let x of r.niet_ingepland||[]){let id=resolve(x.ref);if(id&&!planned.has(id)&&!unplanned.some((u)=>u.task_id===id))unplanned.push({task_id:id,reason:str(x.reden,200)})}
+for(let id of Object.keys(out).map(Number))if(!planned.has(id)&&!unplanned.some((u)=>u.task_id===id))unplanned.push({task_id:id,reason:"Niet ingepland"});
+let pick2=(t)=>({id:t.id,title:t.title,area:t.area,block:t.block,energy:t.energy,deadline:t.deadline,minutes:t.minutes||60,isNew:!!t.isNew});
+return{week:wsDate,days,tasks:Object.fromEntries(Object.values(out).map((t)=>[t.id,pick2(t)])),blocks,unplanned,note:str(r.toelichting,600),skipped}}
+var clampMin=(m)=>Math.max(15,Math.min(Math.round((Number(m)||60)/15)*15,480));
+async function weekCommit(b){let list=(Array.isArray(b.blocks)?b.blocks:[]).slice(0,150),done=0,failed=[],first={};
+for(let x of list){let id=Number(x.task_id);if(!Number.isInteger(id)||!isDate(x.date)||!/^\d{2}:\d{2}$/.test(x.start))continue;
+try{await blockTask({task_id:id,date:x.date,start:x.start,minutes:x.minutes});done++;if(!first[id]||x.date<first[id])first[id]=x.date}catch(e){failed.push({task_id:id,error:e.message})}}
+for(let[id,date]of Object.entries(first)){let [t]=await sql`SELECT status FROM tasks WHERE id = ${Number(id)}`;if(!t||t.status==="done")continue;
+await updateTask(Number(id),{plan_date:date,...(t.status==="doing"?{}:{status:date>today()?"later":"today"})}).catch(()=>{})}
+return{created:done,failed}}
+async function readText(req){let raw=await req.text();try{return String(JSON.parse(raw).text??"").trim()}catch{return raw.trim()}}async function api(req,
 url){let p=url.pathname,m=req.method,body=async()=>await req.json().catch(()=>({})),idFrom=(re)=>Number(p.match(re)?.[1]);if(p==="/api/compass"&&m==="GET")return json(await areasAndGoals());
 if(p==="/api/compass"&&m==="POST")return json(await buildCompass(await body()));if(p==="/api/life/swap"&&m==="POST"){let[cur]=await sql`SELECT t.area FROM days d JOIN tasks t ON t.id = d.life_task_id WHERE d.date = ${today()}`;
 return json(await lifeAction(today(),cur?.area??"-"))}if(p==="/api/today"&&m==="GET")return json(await overview(isDate(url.searchParams.get("date"))?url.searchParams.get("date"):today()));
@@ -376,7 +440,7 @@ return json(rows.reverse())}if(p==="/api/coach"&&m==="POST"){let b=await body(),
 "chat",b.voice===!0))}if(p==="/api/areas"&&m==="GET")return json(await areasAndGoals());if(p==="/api/areas"&&m==="POST")return json(await updateArea(await body()));
 if(p==="/api/goals"&&m==="POST")return json(await saveGoal(await body()));if(p==="/api/training"&&m==="GET")return json(await trainingWeek(isDate(url.searchParams.get("date"))?url.searchParams.get("date"):today()));if(p==="/api/training/plan"&&m==="POST")return json(await setPlan(await body()));
 if(p==="/api/training/generate"&&m==="POST")return json(await generatePlan(await body()));if(p==="/api/training/log"&&m==="POST")return json(await logTraining(await body()));if(p==="/api/google/auth"&&m==="GET"){if(!gConfigured())return json({error:"Zet eerst GOOGLE_CLIENT_ID en GOOGLE_CLIENT_SECRET in Railway"},501);return new Response(null,{status:302,headers:{Location:await googleAuthUrl()}})}
-if(p==="/api/google/disconnect"&&m==="POST")return await sql`DELETE FROM settings WHERE key = 'google'`,gToken=null,json({ok:!0});if(p==="/api/calendar/block"&&m==="POST")return json(await blockTask(await body()));
+if(p==="/api/google/disconnect"&&m==="POST")return await sql`DELETE FROM settings WHERE key = 'google'`,gToken=null,json({ok:!0});if(p==="/api/week/plan"&&m==="POST")return json(await weekPlan(await body()));if(p==="/api/week/commit"&&m==="POST")return json(await weekCommit(await body()));if(p==="/api/calendar/block"&&m==="POST")return json(await blockTask(await body()));
 if(p.startsWith("/api/calendar/block/lb")&&m==="DELETE")return await sql`DELETE FROM blocks WHERE id = ${Number(p.slice(22))}`,json({ok:!0});if(p.startsWith("/api/calendar/block/")&&m==="DELETE")return await gFetch("/"+encodeURIComponent(decodeURIComponent(p.slice(20))),{method:"DELETE"}),json({ok:!0});if(p==="/api/push/key"&&m==="GET")return json({key:env.VAPID_PUBLIC_KEY||null});if(p==="/api/config"&&m==="GET")return json({
 stt:STT?.name??null,tts:env.OPENAI_API_KEY?"openai":null});if(p==="/api/speak"){if(!env.OPENAI_API_KEY)return json({error:"Voorlezen is niet ingesteld"},501);let text=str(m==="GET"?url.searchParams.get("text"):(await body()).text,
 4000).trim();return text?speak(text):json({error:"Lege tekst"},400)}if(p==="/api/transcribe"&&m==="POST"){let audio=await req.blob();if(audio.size>25165824)return json({
