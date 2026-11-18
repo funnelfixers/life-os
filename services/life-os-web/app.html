@@ -28,6 +28,7 @@
 .th .sw i{display:block;height:6px;border-radius:3px;margin-bottom:7px;width:70%}
 .th .sw i+i{width:45%;opacity:.45}
 .set{display:flex;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+#sGcalBtn{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:60%}.gsel{height:40px;border:1px solid var(--line);border-radius:99px;background:none;padding:0 10px;font-size:14px;max-width:170px}
 .set small{display:block;color:var(--muted);font-size:13px}
 .set .seg{margin:0}
 @media (min-width:700px){.themes{grid-template-columns:repeat(4,1fr)}}
@@ -645,6 +646,7 @@ fin,interim);ta.scrollTop=ta.scrollHeight;onText&&onText(false)};r.onerror=(e)=>
 finish()};r.start()};st.stop=()=>new Promise((resolve)=>{done=resolve;st.on=false;try{r&&r.stop()}catch{finish()}setTimeout(()=>{if(done===resolve){done=null;finish();
 resolve()}},1500)});try{begin()}catch(e){setStatus(statusEl,"⚠️ Spraak start niet. Gebruik de \uD83C\uDF99️ op je toetsenbord.");return}rec=st;uiOn(st);setStatus(statusEl,
 "\uD83C\uDF99️ Luistert… tik ■ als je klaar bent")}function toastUndo(msg,fn){toast(msg);const t=$("toast"),b=el("button","","Ongedaan");b.onclick=()=>{t.classList.remove("on","act");fn()};t.appendChild(b);t.classList.add("act");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("on","act"),5000)}
+function syncMsg(n){if(!n)return"";if(n.error)return"⚠️ "+n.error;const p=[n.removed&&n.removed+" weggehaald",n.duplicates&&n.duplicates+" dubbel weg",n.renamed&&n.renamed+" bijgewerkt",n.moved&&n.moved+" verhuisd",n.failed&&n.failed+" mislukt"].filter(Boolean);return p.length?p.join(", "):"je agenda klopte al"}
 function taskGone(){if(current==="vandaag")loadToday();else if(current==="doelen")loadTasks()}
 function slideOut(li){li.style.transition="";li.style.opacity=0;li.style.transform="translateX(-100%)";setTimeout(()=>li.remove(),180)}
 async function archiveTask(t,li){const prev=t.status;slideOut(li);try{await api("/api/tasks/"+t.id,{status:"archived"},"PATCH");t.status="archived";toastUndo("Gearchiveerd",async()=>{try{await api("/api/tasks/"+t.id,{status:prev},"PATCH");t.status=prev}catch(e){toast("⚠️ "+e.message)}taskGone()})}catch(e){toast("⚠️ "+e.message)}taskGone()}
@@ -755,9 +757,9 @@ const bandKey=(s)=>String(s).split(":")[0].trim(),evKind=(e)=>e.task?"task":Stri
 function calFiltMenu(){const old=document.querySelector(".cal-fm");if(old){old.remove();return}const m=el("div","cal-fm");
 const row=(k,label)=>{const l=el("label"),i=el("input");i.type="checkbox";i.checked=!calHide.has(k);i.onchange=()=>{i.checked?calHide.delete(k):calHide.add(k);store.set("cal-hide2",JSON.stringify([...calHide]));markFilt();renderCal()};l.appendChild(i);l.appendChild(el("span","",label));m.appendChild(l)};
 m.appendChild(el("h4","","Agenda's"));row("vytl","VYTL");if(vT&&vT.google&&vT.google.connected){m.appendChild(el("h4","","Google Calendar"));const gl=el("div","muted","Agenda's laden…");gl.style.cssText="padding:7px 14px;font-size:13px";m.appendChild(gl);
-api("/api/google/calendars").then((r)=>{const cals=r.calendars||[];if(!cals.length){gl.textContent="Geen agenda's gevonden";return}gl.remove();cals.forEach((c)=>{const l=el("label"),i=el("input");i.type="checkbox";i.checked=c.on;if(c.color&&!c.primary)i.style.accentColor=c.color;
+api("/api/google/calendars").then((r)=>{const cals=r.calendars||[];if(!cals.length){gl.textContent="Geen agenda's gevonden";return}gl.remove();cals.forEach((c)=>{const l=el("label"),i=el("input");i.type="checkbox";i.checked=c.on;if(c.color&&!c.primary)i.style.accentColor=c.color;if(c.target){i.disabled=true;l.title="Hier komen je VYTL-blokken; deze agenda staat altijd aan"}
 i.onchange=async()=>{c.on=i.checked;i.disabled=true;try{await api("/api/google/calendars",{ids:cals.filter((x)=>x.on).map((x)=>x.id)});loadToday()}catch(e){c.on=!c.on;i.checked=c.on;toast("⚠️ "+e.message)}i.disabled=false};
-l.appendChild(i);l.appendChild(el("span","",c.name));m.appendChild(l)})}).catch((e)=>{gl.textContent="⚠️ "+e.message;const a=el("a","link","Opnieuw koppelen →");a.href="/api/google/auth?key="+encodeURIComponent(key);a.style.cssText="display:block;padding:4px 14px 8px;font-size:13px";gl.after(a)})}
+l.appendChild(i);l.appendChild(el("span","",c.name+(c.target?" · blokken":"")));m.appendChild(l)})}).catch((e)=>{gl.textContent="⚠️ "+e.message;const a=el("a","link","Opnieuw koppelen →");a.href="/api/google/auth?key="+encodeURIComponent(key);a.style.cssText="display:block;padding:4px 14px 8px;font-size:13px";gl.after(a)})}
 document.body.appendChild(m);const r=$("calFilt").getBoundingClientRect();m.style.top=Math.min(r.bottom+6,innerHeight-m.offsetHeight-8)+"px";m.style.left=Math.max(8,Math.min(r.right-m.offsetWidth,innerWidth-m.offsetWidth-8))+"px";
 setTimeout(()=>{const off=(e)=>{if(e.target.closest(".cal-fm,#calFilt"))return;m.remove();document.removeEventListener("click",off)};document.addEventListener("click",off)},0)}
 const markFilt=()=>$("calFilt").classList.toggle("on",calHide.size>0);markFilt();$("calFilt").onclick=calFiltMenu;
@@ -1055,8 +1057,12 @@ pb.hidden=!can||perm==="denied";$("sPushTxt").textContent=!can?(/iPhone|iPad/.te
 pb.textContent=perm==="granted"?"Test":"Aanzetten";pb.onclick=async()=>{if(Notification.permission==="granted"){try{await api("/api/push/test",{});toast("Testmelding verstuurd 🔔")}catch(e){toast("⚠️ "+e.message)}}else{await subscribePush(true);loadSettings()}};
 if(configP)await configP;$("sVoice").textContent=sttServer&&ttsServer?"Inspreken en voorlezen werken":sttServer?"Inspreken werkt, voorlezen niet (OPENAI_API_KEY ontbreekt)":"Werkt zodra OPENAI_API_KEY in Railway staat";
 const gt=$("sGcalTxt"),gb=$("sGcalBtn");gb.innerHTML="";let g={};try{g=(await api("/api/today")).google||{}}catch(e){gt.textContent="⚠️ "+e.message;return}
-gt.textContent=g.connected?"Gekoppeld: blokken komen in je Google-agenda":g.configured?"Niet gekoppeld: blokken staan alleen in VYTL":"Niet ingesteld (GOOGLE_CLIENT_ID ontbreekt in Railway)";
-if(g.connected){const b=el("button","btn","Ontkoppel");b.onclick=async()=>{if(!confirm("Google Calendar ontkoppelen?"))return;try{await api("/api/google/disconnect",{});toast("Ontkoppeld");loadSettings()}catch(e){toast("⚠️ "+e.message)}};gb.appendChild(b)}
+const tgt=g.target||{id:"primary",name:"Hoofdagenda"};gt.textContent=g.connected?"Gekoppeld · blokken komen in \u201c"+tgt.name+"\u201d en blijven gelijk aan je taken":g.configured?"Niet gekoppeld: blokken staan alleen in VYTL":"Niet ingesteld (GOOGLE_CLIENT_ID ontbreekt in Railway)";
+if(g.connected){const sel=el("select","gsel");sel.setAttribute("aria-label","Agenda voor je blokken");sel.appendChild(new Option(tgt.name,tgt.id));sel.disabled=true;
+api("/api/google/calendars").then((r)=>{sel.innerHTML="";(r.calendars||[]).filter((c)=>c.canWrite).forEach((c)=>sel.appendChild(new Option(c.name,c.id)));if(!sel.querySelector(`option[value="${tgt.id}"]`))sel.appendChild(new Option(tgt.name,tgt.id));sel.value=tgt.id;sel.disabled=false}).catch((e)=>{sel.firstChild.textContent="⚠️ "+e.message});
+sel.onchange=async()=>{sel.disabled=true;try{const r=await api("/api/google/target",{id:sel.value});toast("Blokken komen nu in \u201c"+r.target.name+"\u201d · "+syncMsg(r.sync))}catch(e){toast("⚠️ "+e.message)}loadSettings()};
+const cl=el("button","btn","Opschonen");cl.title="Dubbele blokken en blokken van afgeronde taken uit je agenda halen";cl.onclick=async()=>{cl.disabled=true;cl.textContent="Bezig…";try{const r=await api("/api/google/sync",{});toast("🧹 "+syncMsg(r))}catch(e){toast("⚠️ "+e.message)}cl.disabled=false;cl.textContent="Opschonen"};
+const b=el("button","btn","Ontkoppel");b.onclick=async()=>{if(!confirm("Google Calendar ontkoppelen?"))return;try{await api("/api/google/disconnect",{});toast("Ontkoppeld");loadSettings()}catch(e){toast("⚠️ "+e.message)}};gb.append(sel,cl,b)}
 else if(g.configured){const a=el("a","btn","Koppel");a.href="/api/google/auth?key="+encodeURIComponent(key);a.style.cssText="display:inline-flex;align-items:center;text-decoration:none";gb.appendChild(a)}}
 $("sKompas").onclick=()=>openWizard();$("sCopy").onclick=async()=>{try{await navigator.clipboard.writeText(location.origin+"/?key="+encodeURIComponent(key||""));toast("Link gekopieerd")}catch{toast("⚠️ Kopiëren lukte niet")}};
 $("sLogout").onclick=()=>{if(!confirm("Uitloggen op dit apparaat? Je hebt daarna je inloglink weer nodig."))return;try{localStorage.removeItem("app-key");localStorage.removeItem("ramble-key")}catch{}location.href=location.pathname};
