@@ -22,8 +22,9 @@ Lokaal draaien: `cd services/<service> && bun install && PORT=3000 bun index.ts`
 ## Google Calendar: blokken volgen de taken
 
 Een taak die je inplant (slepen op de agenda, "Taak" toevoegen, de weekplanning of de coach) wordt één blok in
-de **doelagenda** (Instellingen → Google Calendar, standaard je hoofdagenda; kies daar bijv. "My week"). De
-meldingen zijn die van die agenda zelf. Daarna houdt `services/ramble` de blokken gelijk aan de taak:
+de **doelagenda** (Instellingen → Google Calendar, standaard je hoofdagenda; kies daar bijv. "My week"), met
+één melding 10 minuten vooraf (`REMIND_MIN`), los van de standaard van die agenda. Daarna houdt `services/ramble`
+de blokken gelijk aan de taak:
 
 - Dezelfde taak op dezelfde dag en tijd nog eens inplannen (of de weekplanning twee keer vastleggen) maakt geen
   tweede blok; de weekplanning vervangt de blokken van een taak die nog moesten komen.
@@ -34,7 +35,7 @@ meldingen zijn die van die agenda zelf. Daarna houdt `services/ramble` de blokke
   Verwijderen haalt alle blokken weg.
 - Elke dag (eerste cron-tik na middernacht), bij elke deploy en met Instellingen → **Opschonen** wordt de
   hele agenda nagelopen: dubbele blokken, blokken van afgeronde of verwijderde taken en oude titels worden
-  rechtgezet en blokken die nog in een andere agenda staan verhuizen naar de doelagenda (`POST /api/google/sync`).
+  rechtgezet (ook de melding van 10 minuten) en blokken die nog in een andere agenda staan verhuizen naar de doelagenda (`POST /api/google/sync`).
 
 De doelagenda wordt altijd gelezen voor het dagoverzicht, ook als hij in het agenda-filter uit staat. Zonder
 Google-koppeling gelden dezelfde regels voor de lokale blokken (tabel `blocks`).

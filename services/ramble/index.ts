@@ -100,7 +100,9 @@ gScanCals=async()=>{let t=await gTarget(),sel=await gSel();return[...new Set([t.
 gSelRead=async()=>{let sel=await gSel(),t=await gTarget();return sel.some((c)=>c.id===t.id)?sel:[...sel,{id:t.id,name:t.name,color:t.color}]},
 gRef=(cal,id)=>cal==="primary"?id:cal+"|"+id,
 blockTitle=(t)=>(t.block==="Deep work"?"🎯 ":"✅ ")+t.title,
-blockBody=(t)=>({summary:blockTitle(t),description:(t.first_step?`Eerste stap: ${t.first_step}\n\n`:"")+"Ingepland vanuit VYTL",extendedProperties:{private:{lifeosTask:String(t.id)}}}),
+REMIND_MIN=10,BLOCK_REMINDERS={useDefault:!1,overrides:[{method:"popup",minutes:REMIND_MIN}]},
+blockBody=(t)=>({summary:blockTitle(t),description:(t.first_step?`Eerste stap: ${t.first_step}\n\n`:"")+"Ingepland vanuit VYTL",extendedProperties:{private:{lifeosTask:String(t.id)}},reminders:BLOCK_REMINDERS}),
+sameReminders=(ev)=>!ev.reminders?.useDefault&&(ev.reminders?.overrides||[]).length===1&&ev.reminders.overrides[0].method==="popup"&&ev.reminders.overrides[0].minutes===REMIND_MIN,
 blockEnd=(start,minutes)=>hm(Math.min(minutesBetween("00:00",start)+minutes,1439)),
 // Een blok dat al begonnen is blijft staan als geschiedenis; alleen wat nog moet komen wordt verplaatst of weggehaald.
 started=(date,start)=>{let n=nowParts();return date<n.date||date===n.date&&start<=n.time},
@@ -108,7 +110,7 @@ daysBetween=(a,b)=>Math.round((new Date(b+"T12:00:00Z")-new Date(a+"T12:00:00Z")
 gConnected=async()=>!!await googleConf().catch(()=>null),
 isClosed=(t)=>["done","archived"].includes(t.status);
 function gEvInfo(cal,ev){if(!ev.start?.dateTime||ev.status==="cancelled")return null;let s0=new Date(ev.start.dateTime),e0=new Date(ev.end?.dateTime||ev.start.dateTime),s=nowParts(s0);
-return{cal,id:ev.id,ref:gRef(cal,ev.id),task:Number(ev.extendedProperties?.private?.lifeosTask)||null,date:s.date,start:s.time,minutes:Math.max(15,Math.round((e0-s0)/6e4)),summary:ev.summary||"",description:ev.description||"",at:s0.getTime()}}
+return{cal,id:ev.id,ref:gRef(cal,ev.id),task:Number(ev.extendedProperties?.private?.lifeosTask)||null,date:s.date,start:s.time,minutes:Math.max(15,Math.round((e0-s0)/6e4)),summary:ev.summary||"",description:ev.description||"",reminders:ev.reminders||{useDefault:!0},at:s0.getTime()}}
 async function gList(cal,params){let out=[],pageToken=null;do{let q=new URLSearchParams({singleEvents:"true",maxResults:"250",...params});if(pageToken)q.set("pageToken",pageToken);
 let d=await gFetch(gCalUrl(cal)+"?"+q);for(let ev of d.items||[]){let i=gEvInfo(cal,ev);if(i)out.push(i)}pageToken=d.nextPageToken||null}while(pageToken);return out}
 /** Alle blokken van één taak, waar ze ook staan (Google zoekt op het kenmerk lifeosTask). */
@@ -118,7 +120,7 @@ var gPatch=(ref,body)=>gFetch(gEvUrl(ref),{method:"PATCH",body:JSON.stringify(bo
 /** Eén blok voor een taak op die dag en tijd: bestaat het al, dan wordt het bijgewerkt, nooit dubbel aangemaakt. */
 async function upsertEvent(t,date,start,minutes,existing){let when={start:gTime(date,start),end:gTime(date,blockEnd(start,minutes))},same=(existing??await taskEvents(t.id)).find((e)=>e.date===date&&e.start===start);
 if(same){let ev=await gPatch(same.ref,{...when,...blockBody(t)});return{...ev,ref:same.ref}}
-let cal=(await gTarget()).id,ev=await gFetch(gCalUrl(cal),{method:"POST",body:JSON.stringify({...when,...blockBody(t),reminders:{useDefault:!0}})});return{...ev,ref:gRef(cal,ev.id)}}
+let cal=(await gTarget()).id,ev=await gFetch(gCalUrl(cal),{method:"POST",body:JSON.stringify({...when,...blockBody(t)})});return{...ev,ref:gRef(cal,ev.id)}}
 /** Plandatum en status van een taak volgen haar eerste blok dat nog moet komen. */
 async function alignPlanDate(taskId){try{let[t]=await sql`SELECT * FROM tasks WHERE id = ${taskId}`;if(!t||isClosed(t)||t.status==="doing")return;
 let open=[...(await sql`SELECT date, start_at AS start FROM blocks WHERE task_id = ${t.id}`),...(await gConnected()?await taskEvents(t.id):[])].filter((b)=>!started(b.date,b.start)).map((b)=>b.date).sort(),first=open[0];
@@ -131,7 +133,7 @@ let title=blockTitle(t);await sql`UPDATE blocks SET title = ${title} WHERE task_
 let local=await sql`SELECT * FROM blocks WHERE task_id = ${t.id}`,evs=google?await taskEvents(t.id):[],shift=0;
 if(change.moved&&isDate(t.plan_date)){let open=[...local.map((b)=>({date:b.date,start:b.start_at})),...evs].filter((b)=>!started(b.date,b.start)).map((b)=>b.date).sort();if(open.length)shift=daysBetween(open[0],t.plan_date)}
 if(shift)for(let b of local)if(!started(b.date,b.start_at))await sql`UPDATE blocks SET date = ${addDays(b.date,shift)} WHERE id = ${b.id}`;
-let body=blockBody(t);for(let ev of evs){let patch={};if(ev.summary!==body.summary||ev.description!==body.description)Object.assign(patch,body);
+let body=blockBody(t);for(let ev of evs){let patch={};if(ev.summary!==body.summary||ev.description!==body.description||!sameReminders(ev))Object.assign(patch,body);
 if(shift&&!started(ev.date,ev.start)){let d=addDays(ev.date,shift);patch.start=gTime(d,ev.start),patch.end=gTime(d,blockEnd(ev.start,ev.minutes))}if(Object.keys(patch).length)await gPatch(ev.ref,patch)}
 }catch(e){gErr=e.message,console.warn("Agenda-sync taak",t.id,":",e.message)}}
 var syncing=null;
@@ -142,7 +144,7 @@ for(let cal of await gScanCals())try{evs.push(...(await gList(cal,q)).filter((e)
 evs.sort((a,b)=>a.at-b.at);let ids=[...new Set(evs.map((e)=>e.task))],tasks=new Map(ids.length?(await sql`SELECT * FROM tasks WHERE id IN ${sql(ids)}`).map((t)=>[t.id,t]):[]);
 for(let ev of evs)try{let t=tasks.get(ev.task),open=!started(ev.date,ev.start),key=`${ev.task}|${ev.date}|${ev.start}`;
 if(!t||isClosed(t)&&open){await gDelete(ev.ref);n.removed++;continue}if(open&&seen.has(key)){await gDelete(ev.ref);n.duplicates++;continue}seen.add(key);
-let body=blockBody(t);if(ev.summary!==body.summary||ev.description!==body.description){await gPatch(ev.ref,body);n.renamed++}
+let body=blockBody(t);if(ev.summary!==body.summary||ev.description!==body.description||!sameReminders(ev)){await gPatch(ev.ref,body);n.renamed++}
 if(ev.cal!==target&&open){await gFetch(gEvUrl(ev.ref)+"/move?"+new URLSearchParams({destination:target}),{method:"POST"});n.moved++}}catch(e){n.failed++,console.warn("Blok",ev.ref,"niet rechtgezet:",e.message)}}
 let rows=await sql`SELECT b.*, t.status, t.title AS t_title, t.block AS t_block FROM blocks b LEFT JOIN tasks t ON t.id = b.task_id WHERE b.task_id IS NOT NULL ORDER BY b.date, b.start_at, b.id`;
 for(let b of rows){let open=!started(b.date,b.start_at),key=`${b.task_id}|${b.date}|${b.start_at}`;
