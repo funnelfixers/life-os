@@ -300,15 +300,6 @@ input.pl-add{margin:10px 0 4px;padding:9px 14px;background:var(--soft);border-ra
 .band.done>.bk{background:#fff}
 .cal .ev.mine{padding-left:30px}.cal .ev.mine .bk{top:3px;border-color:var(--bg);color:var(--fg)}.cal .ev.mine.done .bk{background:var(--bg)}
 .cal .ev.mine.done{opacity:.55}.cal .ev.mine.done .t{text-decoration:line-through}
-.tblist{display:grid;gap:6px}
-.tb{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:var(--tb);color:#fff;cursor:pointer}
-.tb .ck{flex:none;width:18px;height:18px;border-radius:50%;border:1.5px solid rgba(255,255,255,.85);background:none;color:var(--tb);font-size:10px;display:grid;place-items:center;padding:0;cursor:pointer}
-.tb.done .ck{background:#fff}
-.tb .tm{flex:none;width:92px;font-size:13px;opacity:.8;font-variant-numeric:tabular-nums}
-.tb .t{flex:1;min-width:0;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tb.cur{background:var(--tb-cur)}.tb.cur .tm{opacity:1;font-weight:600}
-.tb.done{opacity:.55}.tb.done .t{text-decoration:line-through}
-.tb .nu{flex:none;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;background:#fff;color:var(--tb-cur);border-radius:99px;padding:1px 7px}
 .te .quick{display:flex;flex-wrap:wrap;gap:8px;margin:-4px 0 14px}.te .quick .btn{height:32px;padding:0 12px;font-size:13px}
 .te label.inline{display:flex;align-items:center;gap:8px;margin-bottom:14px}.te label.inline>span{margin:0;font-size:14px;color:var(--fg)}.te label.inline input{width:16px;height:16px;margin:0}
 .cal .ev{position:absolute;border-radius:8px;padding:3px 8px;font-size:12px;line-height:1.3;overflow:hidden;background:var(--bg);border:1px solid var(--line);z-index:1}
@@ -421,11 +412,7 @@ nav.tabbar .brand{display:block;position:absolute;left:0;right:0;top:24px;margin
 <div class="habits" id="vHabits"></div>
 </div>
 </div>
-<div class="fold" id="vPlanFold" hidden>
-<div style="display:flex;align-items:baseline;gap:12px"><h2 style="flex:1;margin-top:8px"><button class="hrow" id="vPlanToggle"><span>Dagplanning <span id="vPlanCount"></span></span><span class="chev">›</span></button></h2><button class="link" id="vPlanAdd" title="Blok toevoegen aan de planning" style="font-size:13px">+ Blok</button></div>
-<div id="vNow" class="card now" hidden></div>
-<div id="vPlanBody" hidden><div class="tblist" id="vPlan"></div><button class="link" id="vPlanReset" style="margin-top:6px;font-size:13px" hidden>Terug naar standaarddag</button></div>
-</div>
+<div id="vNow" class="card now" style="margin-top:10px" hidden></div>
 <h2>Top 3</h2>
 <div class="card list" id="vTop3"></div>
 <button class="link" id="vTop3Coach" style="margin-top:4px" data-go-coach="Help me mijn Top 3 voor vandaag kiezen." hidden>Kiezen met coach →</button>
@@ -791,17 +778,10 @@ let body={date:dt.value,start:st.value,minutes};
 if(kind==="task"){let id=Number(ex.value);if(!id)id=(await api("/api/tasks",{title,area:pj.value||null,plan_date:dt.value})).id;body.task_id=id}else body.title=title;
 await api("/api/calendar/block",body);store.set("cal-add-kind",kind);close();toast("🗓 "+st.value+"–"+hm2(pmin(st.value)+minutes)+" "+title);loadToday()}catch(e){ok.disabled=false;toast("⚠️ "+e.message)}};
 bar.append(no,ok);m.appendChild(bar);bg.appendChild(m);bg.onclick=(e)=>{if(e.target===bg)close()};document.addEventListener("keydown",esc);document.body.appendChild(bg);if(isDesk())setTimeout(()=>ti.focus(),50)}
-let planOpen=store.get("plan-open")!=="0";const byStart=(a,b)=>a.start<b.start?-1:a.start>b.start?1:0;
+const byStart=(a,b)=>a.start<b.start?-1:a.start>b.start?1:0;
 function planCur(sch,date){if(date!==todayISO())return null;const m=nowMin();return (sch||[]).find((b)=>!b.done&&m>=pmin(b.start)&&m<pmin(b.end))||null}
-function renderPlan(o){const sch=o.schedule||[],isT=o.date===todayISO();$("vPlanFold").hidden=false;const done=sch.filter((b)=>b.done).length;$("vPlanCount").textContent=sch.length?`${done}/${sch.length}`:"";setFold("vPlan",planOpen);
-const nowEl=$("vNow");nowEl.innerHTML="";const cur=planCur(sch,o.date),nx=isT?sch.find((b)=>!b.done&&pmin(b.start)>nowMin()):null;
-if(!planOpen&&(cur||nx)){nowEl.hidden=false;nowEl.appendChild(el("div","label",cur?"Nu":"Straks"));nowEl.appendChild(el("div","title",cur?cur.title:nx.title));nowEl.appendChild(el("div","next",cur?`tot ${cur.end}`:nx.start))}else nowEl.hidden=true;
-const list=$("vPlan");list.innerHTML="";if(!sch.length)list.appendChild(el("div","empty",o.workday===false?"Vrije dag, geen vaste planning. Tik + Blok om iets in te plannen.":"Nog geen planning. Tik + Blok."));
-sch.forEach((b)=>{const row=el("div","tb"+(b.done?" done":"")+(b===cur?" cur":""));const ck=el("button","ck",b.done?"✓":"");ck.setAttribute("aria-label",b.done?"Blok heropenen":"Blok afvinken");ck.onclick=(e)=>{e.stopPropagation();togglePlanDone(o.date,b)};row.appendChild(ck);
-row.appendChild(el("div","tm",b.start+"–"+b.end));row.appendChild(el("div","t",(b.emoji&&b.emoji!=="•"?b.emoji+" ":"")+b.title));if(b===cur)row.appendChild(el("span","nu","Nu"));row.onclick=()=>planEditor(o.date,b);list.appendChild(row)});$("vPlanReset").hidden=!o.customPlan}
-$("vPlanToggle").onclick=()=>{planOpen=!planOpen;store.set("plan-open",planOpen?"1":"0");if(vT)renderPlan(vT)};
-$("vPlanAdd").onclick=()=>{const sch=(vT&&vT.schedule)||[],last=sch[sch.length-1];planEditor(vSel,null,last?Math.min(pmin(last.end),23*60):Math.max(CAL0*60,Math.min(23*60,Math.ceil(nowMin()/30)*30)))};
-$("vPlanReset").onclick=async()=>{if(!confirm("Terug naar de standaarddag? Je aanpassingen van deze dag vervallen."))return;try{await savePlan(vSel,[]);toast("Standaarddag hersteld")}catch(e){toast("⚠️ "+e.message)}};
+function renderPlan(o){const sch=o.schedule||[],isT=o.date===todayISO(),nowEl=$("vNow");nowEl.innerHTML="";const cur=planCur(sch,o.date),nx=isT?sch.find((b)=>!b.done&&pmin(b.start)>nowMin()):null;
+if(cur||nx){nowEl.hidden=false;nowEl.appendChild(el("div","label",cur?"Nu":"Straks"));nowEl.appendChild(el("div","title",cur?cur.title:nx.title));nowEl.appendChild(el("div","next",cur?`tot ${cur.end}`:nx.start))}else nowEl.hidden=true}
 function applySchedule(date,sch){if(!sch)return;if(vT&&vT.date===date)vT.schedule=sch;calExtra.forEach((d)=>{if(d.date===date)d.schedule=sch});if(vT&&vT.date===date)renderPlan(vT);renderCal()}
 async function scheduleFor(date){if(vT&&vT.date===date)return vT.schedule||[];const x=calExtra.find((d)=>d.date===date);if(x)return x.schedule||[];return (await api("/api/today?date="+date)).schedule||[]}
 async function savePlan(date,blocks){const r=await api("/api/plan",{date,blocks:blocks.map((b)=>({id:b.id,start:b.start,end:b.end,title:b.title,emoji:b.emoji,done:!!b.done}))});if(vT&&vT.date===date)vT.customPlan=r.plan!=="standaard";applySchedule(date,r.schedule);return r}
@@ -816,6 +796,7 @@ const q=el("div","quick");[15,30,60].forEach((n)=>{const x=el("button","btn","+"
 if(date===todayISO()){const nw=el("button","btn","Tot nu");nw.title="Zet de eindtijd op dit moment";nw.onclick=()=>{en.value=hm2(Math.min(1439,Math.max(pmin(st.value)+5,nowMin())))};q.appendChild(nw)}m.appendChild(q);
 const shL=el("label","inline"),sh=el("input");sh.type="checkbox";sh.checked=store.get("plan-shift")!=="0";shL.appendChild(sh);shL.appendChild(el("span","","Volgende blokken schuiven mee als dit uitloopt"));m.appendChild(shL);
 const bar=el("div","te-bar"),no=el("button","btn","Annuleren"),ok=el("button","btn primary",b?"Opslaan":"Toevoegen");
+if(vT&&vT.date===date&&vT.customPlan){const rs=el("button","link","Hele dag terug naar standaard");rs.style.cssText="display:block;margin:-4px 0 12px";rs.onclick=async()=>{if(!confirm("Terug naar de standaarddag? Je aanpassingen van deze dag vervallen."))return;try{await savePlan(date,[]);close();toast("Standaarddag hersteld")}catch(e){toast("⚠️ "+e.message)}};m.appendChild(rs)}
 if(b){const del=el("button","btn","Verwijderen");del.style.cssText="margin-right:auto;color:var(--rec)";del.onclick=async()=>{if(!confirm("Dit blok uit de planning van deze dag halen?"))return;del.disabled=true;try{const rest=(await scheduleFor(date)).filter((x)=>x.id!==b.id);await savePlan(date,rest);close();toast(rest.length?"Blok verwijderd":"Planning leeg: de standaarddag komt terug")}catch(e){del.disabled=false;toast("⚠️ "+e.message)}};bar.appendChild(del)}
 no.onclick=close;ok.onclick=async()=>{const title=ti.value.trim();if(!title){toast("Geef het blok een naam");ti.focus();return}if(!/^\d{2}:\d{2}$/.test(st.value)||!/^\d{2}:\d{2}$/.test(en.value)||!(en.value>st.value)){toast("Kies een begintijd en een latere eindtijd");return}ok.disabled=true;store.set("plan-shift",sh.checked?"1":"0");
 try{let sch=(await scheduleFor(date)).map((x)=>({...x})),nb;if(b){nb=sch.find((x)=>x.id===b.id);if(!nb){nb={id:b.id,emoji:b.emoji,done:b.done};sch.push(nb)}}else{nb={emoji:"•",done:false};sch.push(nb)}Object.assign(nb,{title,start:st.value,end:en.value});sch.sort(byStart);if(sh.checked)sch=cascade(sch,sch.indexOf(nb));
