@@ -24,7 +24,7 @@ past op de HTML nog tekst-patches toe (`WEB_PATCHES` in `services/ramble/index.t
 Het dagritme komt uit `ramble` (`SCHEDULE`, of een eigen indeling per dag in `days.plan`). Elk blok heeft
 een `id` en een `done`-vlag (`days.plan_done`). De schermen vinken blokken af (`POST /api/plan/done`) en
 slaan een aangepaste indeling op (`POST /api/plan`, hele lijst; lege lijst = standaarddag). Loopt een blok
-uit, dan schuift de app de volgende blokken in het scherm door en stuurt de nieuwe lijst op.
+uit, dan schuift de app de volgende blokken in het scherm door en stuurt de nieuwe lijst op. De planning staat alleen in de Calendar; Vandaag toont enkel "Nu … tot …". Blokken zijn in de Calendar te verslepen (long-press) en uit te rekken (handvat onderaan), net als taak-kaarten.
 
 ## Werkwijze
 1. Maak een branch, wijzig de code en open een PR naar `main`.
