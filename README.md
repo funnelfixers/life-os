@@ -14,6 +14,18 @@ in één map alleen die service opnieuw deployt. Geheimen staan alleen in de Rai
 
 Lokaal draaien: `cd services/<service> && bun install && PORT=3000 bun index.ts`.
 
+### Schermen (`services/life-os-web`)
+De leesbare bron is `app.html` (plus `sw.js`). `index.ts` wordt gegenereerd: na een wijziging
+`cd services/life-os-web && node build-web.mjs` draaien en `index.ts` mee committen. Let op: `ramble`
+past op de HTML nog tekst-patches toe (`WEB_PATCHES` in `services/ramble/index.ts`); die moeten op
+`app.html` blijven matchen.
+
+### Dagplanning (timeblocks)
+Het dagritme komt uit `ramble` (`SCHEDULE`, of een eigen indeling per dag in `days.plan`). Elk blok heeft
+een `id` en een `done`-vlag (`days.plan_done`). De schermen vinken blokken af (`POST /api/plan/done`) en
+slaan een aangepaste indeling op (`POST /api/plan`, hele lijst; lege lijst = standaarddag). Loopt een blok
+uit, dan schuift de app de volgende blokken in het scherm door en stuurt de nieuwe lijst op. De planning staat alleen in de Calendar; Vandaag toont enkel "Nu … tot …". Blokken zijn in de Calendar te verslepen (long-press) en uit te rekken (handvat onderaan), net als taak-kaarten.
+
 ## Werkwijze
 1. Maak een branch, wijzig de code en open een PR naar `main`.
 2. Merge de PR; Railway bouwt en deployt de betreffende service.
